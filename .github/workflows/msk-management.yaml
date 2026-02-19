@@ -1,0 +1,27 @@
+name: Test AWS Authentication
+
+on:
+  workflow_dispatch:
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  test-auth:
+    runs-on: self-hosted
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v3
+
+      - name: Authenticate to AWS
+        uses: ./.github/actions/aws-oidc-auth
+        with:
+          aws-region: us-east-1
+          iam-role-arn: arn:aws:iam::972999821187:role/github-aws-oidc-role
+          session-duration: '900'
+
+      - name: Verify Authentication
+        run: |
+          aws sts get-caller-identity

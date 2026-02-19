@@ -1,0 +1,58 @@
+name: 'AWS OIDC Authentication'
+description: 'Authenticate to AWS using OIDC with GitHub Actions'
+
+inputs:
+  aws-region:
+    description: 'AWS region to authenticate to'
+    required: true
+  iam-role-arn:
+    description: 'IAM role ARN to assume'
+    required: true
+  session-duration:
+    description: 'Session duration in seconds (max 3600 for OIDC)'
+    required: false
+    default: '900'
+
+outputs:
+  account-id:
+    description: 'AWS account ID'
+    value: ${{ steps.auth.outputs.aws-account-id }}
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Validate session duration
+      shell: bash
+      run: |
+        DURATION="${{ inputs.session-duration }}"
+        if ! [[ "$DURATION" =~ ^[0-9]+$ ]]; then
+          echo "::error::session-duration must be a numeric value, got: '$DURATION'"
+          exit 1
+        fi
+        if [ "$DURATION" -lt 900 ] || [ "$DURATION" -gt 3600 ]; then
+          echo "::error::session-duration must be between 900 and 3600 seconds (AWS OIDC limit), got: $DURATION"
+          exit 1
+        fi
+
+    - name: Configure AWS credentials
+      id: auth
+      uses: aws-actions/configure-aws-credentials@v6
+      with:
+        role-to-assume: ${{ inputs.iam-role-arn }}
+        role-session-name: github-actions-${{ github.run_id }}
+        aws-region: ${{ inputs.aws-region }}
+        role-duration-seconds: ${{ inputs.session-duration }}
+        mask-aws-account-id: false
+
+    - name: Verify AWS authentication
+      shell: bash
+      run: |
+        ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
+        echo "### AWS Authentication Successful"
+        echo "**Account ID:** $ACCOUNT_ID"
+        echo "**Region:** ${{ inputs.aws-region }}"
+        echo "**Role ARN:** ${{ inputs.iam-role-arn }}"
+        echo "**Session Duration:** ${{ inputs.session-duration }}s"
+        
+        # Export the account ID as output so it can be consumed by workflow steps or jobs
+        echo "aws-account-id=$ACCOUNT_ID" >> $GITHUB_OUTPUT  
