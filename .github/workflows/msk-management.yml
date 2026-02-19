@@ -34,7 +34,7 @@ jobs:
   # ══════════════════════════════════════
   validation:
     runs-on: self-hosted
-    needs: load-configuration
+    
     outputs:
       bootstrap_broker: ${{ steps.validate.outputs.bootstrap-broker }}
       cluster_arn: ${{ steps.validate.outputs.cluster-arn }}
