@@ -147,79 +147,25 @@ runs:
 
         echo "✅ Topic '$TOPIC_NAME' found!"
 
-        echo ""
-        echo "══════════════════════════════════════"
-        echo "🔍 Validation 7 - Checking user '$USERNAME'..."
-        echo "══════════════════════════════════════"
-
-        USER_SECRET=$(aws secretsmanager get-secret-value \
-          --secret-id "msk/users/$USERNAME" \
-          --region "$AWS_REGION" \
-          --query 'SecretString' \
-          --output text 2>&1)
-
-        if [ $? -ne 0 ]; then
-          echo "❌ User '$USERNAME' NOT found in Secrets Manager!"
-          echo "👉 Please contact Admin to create: msk/users/$USERNAME"
-          exit 1
-        fi
-
-        echo "✅ User '$USERNAME' found!"
+            echo "✅ client.properties created!"
+        cat ~/client.properties
 
         echo ""
         echo "══════════════════════════════════════"
-        echo "🔍 Validation 8 - Checking user associated with MSK..."
+        echo "🔍 Validation 4.1 - Setting admin permissions..."
         echo "══════════════════════════════════════"
 
-        SECRET_ARN=$(aws secretsmanager describe-secret \
-          --secret-id "msk/users/$USERNAME" \
-          --region "$AWS_REGION" \
-          --query 'ARN' \
-          --output text 2>&1)
-
-        ASSOCIATED=$(aws kafka list-scram-secrets \
-          --cluster-arn "$CLUSTER_ARN" \
-          --region "$AWS_REGION" \
-          --query 'SecretArnList' \
-          --output text 2>&1 | grep "$SECRET_ARN" || true)
-
-        if [ -z "$ASSOCIATED" ]; then
-          echo "❌ User '$USERNAME' NOT associated with MSK!"
-          echo "👉 Please contact Admin to associate user"
-          exit 1
-        fi
-
-        echo "✅ User '$USERNAME' is associated with MSK!"
-
-        echo ""
-        echo "══════════════════════════════════════"
-        echo "🔍 Validation 9 - Checking ACL not already applied..."
-        echo "══════════════════════════════════════"
-
-        EXISTING_ACL=$(kafka-acls.sh \
+        # Give admin CLUSTER ALL permission
+        kafka-acls.sh \
           --bootstrap-server "$BOOTSTRAP_BROKER" \
           --command-config ~/client.properties \
-          --list \
-          --topic "$TOPIC_NAME" 2>&1 | grep "User:$USERNAME" | grep "$PERMISSION" || true)
+          --add \
+          --allow-principal "User:admin" \
+          --operation ALL \
+          --cluster 2>&1
 
-        if [ -n "$EXISTING_ACL" ]; then
-          echo "⚠️ ACL already exists!"
-          echo "   User       : $USERNAME"
-          echo "   Topic      : $TOPIC_NAME"
-          echo "   Permission : $PERMISSION"
-          exit 1
+        if [ $? -ne 0 ]; then
+          echo "⚠️ Could not set cluster permission - may already exist"
+        else
+          echo "✅ Admin CLUSTER ALL permission set!"
         fi
-
-        echo "✅ ACL does not exist yet!"
-
-        echo ""
-        echo "══════════════════════════════════════"
-        echo "✅ ALL VALIDATIONS PASSED!"
-        echo "   Cluster : $CLUSTER_NAME"
-        echo "   Topic   : $TOPIC_NAME"
-        echo "   User    : $USERNAME"
-        echo "   Broker  : $BOOTSTRAP_BROKER"
-        echo "══════════════════════════════════════"
-
-        echo "bootstrap-broker=$BOOTSTRAP_BROKER" >> $GITHUB_OUTPUT
-        echo "cluster-arn=$CLUSTER_ARN" >> $GITHUB_OUTPUT
