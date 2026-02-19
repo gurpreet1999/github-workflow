@@ -1,11 +1,11 @@
-name: 'MSK Validation'
-description: 'Validate cluster, topic, user and ACL for MSK'
+name: 'MSK Safety Checks'
+description: 'Validate MSK cluster, topic, user and ACL'
 
 inputs:
-  cluster_name:
+  cluster-name:
     description: 'MSK Cluster Name'
     required: true
-  topic_name:
+  topic-name:
     description: 'Kafka Topic Name'
     required: true
   username:
@@ -14,7 +14,7 @@ inputs:
   permission:
     description: 'Permission'
     required: true
-  aws_region:
+  aws-region:
     description: 'AWS Region'
     required: true
   admin-secret-id:
@@ -43,9 +43,6 @@ runs:
         PERMISSION="${{ inputs.permission }}"
         ADMIN_SECRET_ID="${{ inputs.admin-secret-id }}"
 
-        # ─────────────────────────────────────
-        # VALIDATION 1 - Find Cluster
-        # ─────────────────────────────────────
         echo "══════════════════════════════════════"
         echo "🔍 Validation 1 - Finding cluster '$CLUSTER_NAME'..."
         echo "══════════════════════════════════════"
@@ -58,16 +55,11 @@ runs:
 
         if [ $? -ne 0 ] || [ "$CLUSTER_ARN" == "None" ] || [ -z "$CLUSTER_ARN" ]; then
           echo "❌ Cluster '$CLUSTER_NAME' NOT found!"
-          echo "👉 Check cluster name and region"
           exit 1
         fi
 
-        echo "✅ Cluster found!"
-        echo "   ARN: $CLUSTER_ARN"
+        echo "✅ Cluster found! ARN: $CLUSTER_ARN"
 
-        # ─────────────────────────────────────
-        # VALIDATION 2 - Check Cluster ACTIVE
-        # ─────────────────────────────────────
         echo ""
         echo "══════════════════════════════════════"
         echo "🔍 Validation 2 - Checking cluster state..."
@@ -80,16 +72,12 @@ runs:
           --output text)
 
         if [ "$CLUSTER_STATE" != "ACTIVE" ]; then
-          echo "❌ Cluster is NOT ACTIVE!"
-          echo "   Current State: $CLUSTER_STATE"
+          echo "❌ Cluster is NOT ACTIVE! State: $CLUSTER_STATE"
           exit 1
         fi
 
         echo "✅ Cluster is ACTIVE!"
 
-        # ─────────────────────────────────────
-        # VALIDATION 3 - Get Broker
-        # ─────────────────────────────────────
         echo ""
         echo "══════════════════════════════════════"
         echo "🔍 Validation 3 - Fetching broker..."
@@ -103,16 +91,11 @@ runs:
 
         if [ $? -ne 0 ] || [ -z "$BOOTSTRAP_BROKER" ] || [ "$BOOTSTRAP_BROKER" == "None" ]; then
           echo "❌ Failed to get broker!"
-          echo "   Error: $BOOTSTRAP_BROKER"
           exit 1
         fi
 
-        echo "✅ Broker fetched!"
-        echo "   Broker: $BOOTSTRAP_BROKER"
+        echo "✅ Broker: $BOOTSTRAP_BROKER"
 
-        # ─────────────────────────────────────
-        # VALIDATION 4 - Fetch Admin Credentials
-        # ─────────────────────────────────────
         echo ""
         echo "══════════════════════════════════════"
         echo "🔍 Validation 4 - Fetching admin credentials..."
@@ -148,9 +131,6 @@ runs:
 
         echo "✅ client.properties created!"
 
-        # ─────────────────────────────────────
-        # VALIDATION 5 - Connect to Broker
-        # ─────────────────────────────────────
         echo ""
         echo "══════════════════════════════════════"
         echo "🔍 Validation 5 - Connecting to broker..."
@@ -167,12 +147,8 @@ runs:
           exit 1
         fi
 
-        echo "✅ Connected to broker!"
-        echo "   Total topics: $(echo "$TOPICS" | wc -l)"
+        echo "✅ Connected! Total topics: $(echo "$TOPICS" | wc -l)"
 
-        # ─────────────────────────────────────
-        # VALIDATION 6 - Check Topic Exists
-        # ─────────────────────────────────────
         echo ""
         echo "══════════════════════════════════════"
         echo "🔍 Validation 6 - Checking topic '$TOPIC_NAME'..."
@@ -181,16 +157,13 @@ runs:
         TOPIC_EXISTS=$(echo "$TOPICS" | grep -w "$TOPIC_NAME" || true)
 
         if [ -z "$TOPIC_EXISTS" ]; then
-          echo "❌ Topic '$TOPIC_NAME' does NOT exist!"
+          echo "❌ Topic '$TOPIC_NAME' NOT found!"
           echo "👉 Please contact Admin to create topic"
           exit 1
         fi
 
         echo "✅ Topic '$TOPIC_NAME' found!"
 
-        # ─────────────────────────────────────
-        # VALIDATION 7 - Check User in Secrets Manager
-        # ─────────────────────────────────────
         echo ""
         echo "══════════════════════════════════════"
         echo "🔍 Validation 7 - Checking user '$USERNAME'..."
@@ -208,11 +181,8 @@ runs:
           exit 1
         fi
 
-        echo "✅ User '$USERNAME' found in Secrets Manager!"
+        echo "✅ User '$USERNAME' found!"
 
-        # ─────────────────────────────────────
-        # VALIDATION 8 - Check User Associated with MSK
-        # ─────────────────────────────────────
         echo ""
         echo "══════════════════════════════════════"
         echo "🔍 Validation 8 - Checking user associated with MSK..."
@@ -238,9 +208,6 @@ runs:
 
         echo "✅ User '$USERNAME' is associated with MSK!"
 
-        # ─────────────────────────────────────
-        # VALIDATION 9 - Check ACL Not Already Applied
-        # ─────────────────────────────────────
         echo ""
         echo "══════════════════════════════════════"
         echo "🔍 Validation 9 - Checking ACL not already applied..."
@@ -257,23 +224,18 @@ runs:
           echo "   User       : $USERNAME"
           echo "   Topic      : $TOPIC_NAME"
           echo "   Permission : $PERMISSION"
-          echo "👉 No need to apply again!"
           exit 1
         fi
 
         echo "✅ ACL does not exist yet!"
 
-        # ─────────────────────────────────────
-        # ALL VALIDATIONS PASSED
-        # ─────────────────────────────────────
         echo ""
         echo "══════════════════════════════════════"
         echo "✅ ALL VALIDATIONS PASSED!"
-        echo "   Cluster    : $CLUSTER_NAME"
-        echo "   Topic      : $TOPIC_NAME"
-        echo "   Username   : $USERNAME"
-        echo "   Permission : $PERMISSION"
-        echo "   Broker     : $BOOTSTRAP_BROKER"
+        echo "   Cluster : $CLUSTER_NAME"
+        echo "   Topic   : $TOPIC_NAME"
+        echo "   User    : $USERNAME"
+        echo "   Broker  : $BOOTSTRAP_BROKER"
         echo "══════════════════════════════════════"
 
         echo "bootstrap-broker=$BOOTSTRAP_BROKER" >> $GITHUB_OUTPUT

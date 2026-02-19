@@ -51,13 +51,75 @@ jobs:
         id: validate
         uses: ./.github/actions/msk-safety-checks
         with:
-          cluster_name: ${{ github.event.inputs.cluster_name }}
-          topic_name: ${{ github.event.inputs.topic_name }}
+          cluster-name: ${{ github.event.inputs.cluster_name }}
+          topic-name: ${{ github.event.inputs.topic_name }}
           username: ${{ github.event.inputs.username }}
           permission: ${{ github.event.inputs.permission }}
-          aws_region: us-east-1
+          aws-region: us-east-1
           admin-secret-id: StrongPassword123
 
       - name: Cleanup
         if: always()
         run: rm -f ~/client.properties
+
+  # ══════════════════════════════════════
+  # STAGE 2 - EXECUTION
+  # ══════════════════════════════════════
+  execution:
+    runs-on: self-hosted
+    needs: [validation]
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v3
+
+      - name: Authenticate to AWS
+        uses: ./.github/actions/aws-oidc-auth
+        with:
+          aws-region: us-east-1
+          iam-role-arn: arn:aws:iam::972999821187:role/github-aws-oidc-role
+          session-duration: '900'
+
+      - name: Make Scripts Executable
+        run: chmod +x scripts/msk/*.sh
+
+      - name: Setup Admin & Reconnect to Broker
+        run: |
+          echo "🔍 Fetching admin credentials..."
+
+          SECRET=$(aws secretsmanager get-secret-value \
+            --secret-id "StrongPassword123" \
+            --region "us-east-1" \
+            --query 'SecretString' \
+            --output text)
+
+          ADMIN_USER=$(echo "$SECRET" | python3 -c "import sys,json; print(json.load(sys.stdin)['username'])")
+          ADMIN_PASS=$(echo "$SECRET" | python3 -c "import sys,json; print(json.load(sys.stdin)['password'])")
+
+          cat > ~/client.properties << EOF
+          security.protocol=SASL_SSL
+          sasl.mechanism=SCRAM-SHA-512
+          sasl.jaas.config=org.apache.kafka.common.security.scram.ScramLoginModule required username="$ADMIN_USER" password="$ADMIN_PASS";
+          EOF
+
+          echo "✅ Connected to broker: ${{ needs.validation.outputs.bootstrap_broker }}"
+
+      - name: Apply ACL
+        run: |
+          ./scripts/msk/apply-acl.sh \
+            "${{ github.event.inputs.username }}" \
+            "${{ github.event.inputs.topic_name }}" \
+            "${{ github.event.inputs.permission }}" \
+            "${{ needs.validation.outputs.bootstrap_broker }}"
+
+      - name: Verify ACL
+        run: |
+          ./scripts/msk/verify_acl.sh \
+            "${{ github.event.inputs.topic_name }}" \
+            "${{ needs.validation.outputs.bootstrap_broker }}"
+
+      - name: Cleanup
+        if: always()
+        run: |
+          rm -f ~/client.properties
+          echo "🧹 Cleanup done!"
