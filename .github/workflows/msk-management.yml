@@ -27,39 +27,8 @@ permissions:
 
 jobs:
 
-  # ══════════════════════════════════════
-  # STAGE 1 - LOAD CONFIGURATION
-  # ══════════════════════════════════════
-  load-configuration:
-    runs-on: self-hosted
-    outputs:
-      cluster_name: ${{ steps.config.outputs.cluster_name }}
-      topic_name: ${{ steps.config.outputs.topic_name }}
-      username: ${{ steps.config.outputs.username }}
-      permission: ${{ steps.config.outputs.permission }}
-
-    steps:
-      - name: Checkout Code
-        uses: actions/checkout@v3
-
-      - name: Load Configuration
-        id: config
-        run: |
-          echo "══════════════════════════════════════"
-          echo "📋 Stage 1 - Loading Configuration..."
-          echo "══════════════════════════════════════"
-          echo "   Cluster    : ${{ github.event.inputs.cluster_name }}"
-          echo "   Topic      : ${{ github.event.inputs.topic_name }}"
-          echo "   Username   : ${{ github.event.inputs.username }}"
-          echo "   Permission : ${{ github.event.inputs.permission }}"
-          echo "══════════════════════════════════════"
-          echo "✅ Configuration loaded!"
-
-          echo "cluster_name=${{ github.event.inputs.cluster_name }}" >> $GITHUB_OUTPUT
-          echo "topic_name=${{ github.event.inputs.topic_name }}" >> $GITHUB_OUTPUT
-          echo "username=${{ github.event.inputs.username }}" >> $GITHUB_OUTPUT
-          echo "permission=${{ github.event.inputs.permission }}" >> $GITHUB_OUTPUT
-
+ 
+  
   # ══════════════════════════════════════
   # STAGE 2 - VALIDATION
   # ══════════════════════════════════════
@@ -77,20 +46,20 @@ jobs:
       - name: Authenticate to AWS
         uses: ./.github/actions/aws-oidc-auth
         with:
-          aws-region: ${{ secrets.AWS_REGION }}
-          iam-role-arn: ${{ secrets.IAM_ROLE_ARN }}
+          aws-region: us-east-1
+          iam-role-arn: arn:aws:iam::972999821187:role/github-aws-oidc-role
           session-duration: '900'
 
       - name: Run All Validations
         id: validate
-        uses: ./.github/actions/msk-validation
+        uses: ./.github/actions/msk-safety-checks
         with:
           cluster-name: ${{ needs.load-configuration.outputs.cluster_name }}
           topic-name: ${{ needs.load-configuration.outputs.topic_name }}
           username: ${{ needs.load-configuration.outputs.username }}
           permission: ${{ needs.load-configuration.outputs.permission }}
-          aws-region: ${{ secrets.AWS_REGION }}
-          admin-secret-id: ${{ secrets.ADMIN_SECRET_ID }}
+          aws-region: us-east-1
+          admin-secret-id: StrongPassword123
 
       - name: Cleanup
         if: always()
