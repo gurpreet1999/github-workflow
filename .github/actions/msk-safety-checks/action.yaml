@@ -98,11 +98,12 @@ runs:
 
         echo ""
       
+        ADMIN_USER="admin"
 
         cat > ~/client.properties << EOF
         security.protocol=SASL_SSL
         sasl.mechanism=SCRAM-SHA-512
-        sasl.jaas.config=org.apache.kafka.common.security.scram.ScramLoginModule required username="admin" password="$ADMIN_SECRET_ID";
+        sasl.jaas.config=org.apache.kafka.common.security.scram.ScramLoginModule required username="$ADMIN_USER" password="$ADMIN_SECRET_ID";
         EOF
 
         echo "✅ client.properties created!"
