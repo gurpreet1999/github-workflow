@@ -2,10 +2,10 @@ name: 'MSK Validation'
 description: 'Validate cluster, topic, user and ACL for MSK'
 
 inputs:
-  cluster-name:
+  cluster_name:
     description: 'MSK Cluster Name'
     required: true
-  topic-name:
+  topic_name:
     description: 'Kafka Topic Name'
     required: true
   username:
@@ -14,7 +14,7 @@ inputs:
   permission:
     description: 'Permission'
     required: true
-  aws-region:
+  aws_region:
     description: 'AWS Region'
     required: true
   admin-secret-id:

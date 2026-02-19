@@ -51,11 +51,11 @@ jobs:
         id: validate
         uses: ./.github/actions/msk-safety-checks
         with:
-          cluster-name: ${{ github.event.inputs.cluster_name }}
-          topic-name: ${{ github.event.inputs.topic_name }}
+          cluster_name: ${{ github.event.inputs.cluster_name }}
+          topic_name: ${{ github.event.inputs.topic_name }}
           username: ${{ github.event.inputs.username }}
           permission: ${{ github.event.inputs.permission }}
-          aws-region: us-east-1
+          aws_region: us-east-1
           admin-secret-id: StrongPassword123
 
       - name: Cleanup
