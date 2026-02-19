@@ -97,36 +97,12 @@ runs:
         echo "✅ Broker: $BOOTSTRAP_BROKER"
 
         echo ""
-        echo "══════════════════════════════════════"
-        echo "🔍 Validation 4 - Fetching admin credentials..."
-        echo "══════════════════════════════════════"
-
-        SECRET=$(aws secretsmanager get-secret-value \
-          --secret-id "$ADMIN_SECRET_ID" \
-          --region "$AWS_REGION" \
-          --query 'SecretString' \
-          --output text 2>&1)
-
-        if [ $? -ne 0 ]; then
-          echo "❌ Failed to fetch admin credentials!"
-          echo "   Error: $SECRET"
-          exit 1
-        fi
-
-        ADMIN_USER=$(echo "$SECRET" | python3 -c "import sys,json; print(json.load(sys.stdin)['username'])")
-        ADMIN_PASS=$(echo "$SECRET" | python3 -c "import sys,json; print(json.load(sys.stdin)['password'])")
-
-        if [ -z "$ADMIN_USER" ] || [ -z "$ADMIN_PASS" ]; then
-          echo "❌ Failed to parse admin credentials!"
-          exit 1
-        fi
-
-        echo "✅ Admin credentials fetched!"
+      
 
         cat > ~/client.properties << EOF
         security.protocol=SASL_SSL
         sasl.mechanism=SCRAM-SHA-512
-        sasl.jaas.config=org.apache.kafka.common.security.scram.ScramLoginModule required username="$ADMIN_USER" password="$ADMIN_PASS";
+        sasl.jaas.config=org.apache.kafka.common.security.scram.ScramLoginModule required username="admin" password="$ADMIN_SECRET_ID";
         EOF
 
         echo "✅ client.properties created!"
