@@ -160,12 +160,18 @@ runs:
           --bootstrap-server "$BOOTSTRAP_BROKER" \
           --command-config ~/client.properties \
           --add \
-          --allow-principal "User:admin" \
-          --operation ALL \
-          --cluster 2>&1
+          --allow-principal "User:$USERNAME" \
+          --operation "$PERMISSION" \
+          --topic "$TOPIC_NAME" 2>&1
 
         if [ $? -ne 0 ]; then
-          echo "⚠️ Could not set cluster permission - may already exist"
-        else
-          echo "✅ Admin CLUSTER ALL permission set!"
+          echo "❌ Failed to apply ACL!"
+          exit 1
         fi
+
+        echo "──────────────────────────────────────"
+        echo "✅ ACL Applied Successfully!"
+        echo "   User       : $USERNAME"
+        echo "   Topic      : $TOPIC_NAME"
+        echo "   Permission : $PERMISSION"
+        echo "──────────────────────────────────────"
