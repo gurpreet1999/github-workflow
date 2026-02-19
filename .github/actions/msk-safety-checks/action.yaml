@@ -132,29 +132,7 @@ runs:
 
         echo "✅ Connected! Total topics: $(echo "$TOPICS" | wc -l)"
 
-        echo ""
-        echo "══════════════════════════════════════"
-        echo "🔍 Validation 6 - Checking topic '$TOPIC_NAME'..."
-        echo "══════════════════════════════════════"
-
-        TOPIC_EXISTS=$(echo "$TOPICS" | grep -w "$TOPIC_NAME" || true)
-
-        if [ -z "$TOPIC_EXISTS" ]; then
-          echo "❌ Topic '$TOPIC_NAME' NOT found!"
-          echo "👉 Please contact Admin to create topic"
-          exit 1
-        fi
-
-        echo "✅ Topic '$TOPIC_NAME' found!"
-
-            echo "✅ client.properties created!"
-        cat ~/client.properties
-
-        echo ""
-        echo "══════════════════════════════════════"
-        echo "🔍 Validation 4.1 - Setting admin permissions..."
-        echo "══════════════════════════════════════"
-
+    
         # Give admin CLUSTER ALL permission
         kafka-acls.sh \
           --bootstrap-server "$BOOTSTRAP_BROKER" \
