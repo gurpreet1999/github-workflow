@@ -1,0 +1,280 @@
+name: 'MSK Validation'
+description: 'Validate cluster, topic, user and ACL for MSK'
+
+inputs:
+  cluster-name:
+    description: 'MSK Cluster Name'
+    required: true
+  topic-name:
+    description: 'Kafka Topic Name'
+    required: true
+  username:
+    description: 'Username'
+    required: true
+  permission:
+    description: 'Permission'
+    required: true
+  aws-region:
+    description: 'AWS Region'
+    required: true
+  admin-secret-id:
+    description: 'Admin Secret ID in Secrets Manager'
+    required: true
+
+outputs:
+  bootstrap-broker:
+    description: 'Bootstrap Broker URL'
+    value: ${{ steps.validation.outputs.bootstrap-broker }}
+  cluster-arn:
+    description: 'Cluster ARN'
+    value: ${{ steps.validation.outputs.cluster-arn }}
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Run All Validations
+      id: validation
+      shell: bash
+      run: |
+        AWS_REGION="${{ inputs.aws-region }}"
+        CLUSTER_NAME="${{ inputs.cluster-name }}"
+        TOPIC_NAME="${{ inputs.topic-name }}"
+        USERNAME="${{ inputs.username }}"
+        PERMISSION="${{ inputs.permission }}"
+        ADMIN_SECRET_ID="${{ inputs.admin-secret-id }}"
+
+        # ─────────────────────────────────────
+        # VALIDATION 1 - Find Cluster
+        # ─────────────────────────────────────
+        echo "══════════════════════════════════════"
+        echo "🔍 Validation 1 - Finding cluster '$CLUSTER_NAME'..."
+        echo "══════════════════════════════════════"
+
+        CLUSTER_ARN=$(aws kafka list-clusters \
+          --region "$AWS_REGION" \
+          --cluster-name-filter "$CLUSTER_NAME" \
+          --query 'ClusterInfoList[0].ClusterArn' \
+          --output text 2>&1)
+
+        if [ $? -ne 0 ] || [ "$CLUSTER_ARN" == "None" ] || [ -z "$CLUSTER_ARN" ]; then
+          echo "❌ Cluster '$CLUSTER_NAME' NOT found!"
+          echo "👉 Check cluster name and region"
+          exit 1
+        fi
+
+        echo "✅ Cluster found!"
+        echo "   ARN: $CLUSTER_ARN"
+
+        # ─────────────────────────────────────
+        # VALIDATION 2 - Check Cluster ACTIVE
+        # ─────────────────────────────────────
+        echo ""
+        echo "══════════════════════════════════════"
+        echo "🔍 Validation 2 - Checking cluster state..."
+        echo "══════════════════════════════════════"
+
+        CLUSTER_STATE=$(aws kafka describe-cluster \
+          --cluster-arn "$CLUSTER_ARN" \
+          --region "$AWS_REGION" \
+          --query 'ClusterInfo.State' \
+          --output text)
+
+        if [ "$CLUSTER_STATE" != "ACTIVE" ]; then
+          echo "❌ Cluster is NOT ACTIVE!"
+          echo "   Current State: $CLUSTER_STATE"
+          exit 1
+        fi
+
+        echo "✅ Cluster is ACTIVE!"
+
+        # ─────────────────────────────────────
+        # VALIDATION 3 - Get Broker
+        # ─────────────────────────────────────
+        echo ""
+        echo "══════════════════════════════════════"
+        echo "🔍 Validation 3 - Fetching broker..."
+        echo "══════════════════════════════════════"
+
+        BOOTSTRAP_BROKER=$(aws kafka get-bootstrap-brokers \
+          --cluster-arn "$CLUSTER_ARN" \
+          --region "$AWS_REGION" \
+          --query 'BootstrapBrokerStringSaslScram' \
+          --output text 2>&1)
+
+        if [ $? -ne 0 ] || [ -z "$BOOTSTRAP_BROKER" ] || [ "$BOOTSTRAP_BROKER" == "None" ]; then
+          echo "❌ Failed to get broker!"
+          echo "   Error: $BOOTSTRAP_BROKER"
+          exit 1
+        fi
+
+        echo "✅ Broker fetched!"
+        echo "   Broker: $BOOTSTRAP_BROKER"
+
+        # ─────────────────────────────────────
+        # VALIDATION 4 - Fetch Admin Credentials
+        # ─────────────────────────────────────
+        echo ""
+        echo "══════════════════════════════════════"
+        echo "🔍 Validation 4 - Fetching admin credentials..."
+        echo "══════════════════════════════════════"
+
+        SECRET=$(aws secretsmanager get-secret-value \
+          --secret-id "$ADMIN_SECRET_ID" \
+          --region "$AWS_REGION" \
+          --query 'SecretString' \
+          --output text 2>&1)
+
+        if [ $? -ne 0 ]; then
+          echo "❌ Failed to fetch admin credentials!"
+          echo "   Error: $SECRET"
+          exit 1
+        fi
+
+        ADMIN_USER=$(echo "$SECRET" | python3 -c "import sys,json; print(json.load(sys.stdin)['username'])")
+        ADMIN_PASS=$(echo "$SECRET" | python3 -c "import sys,json; print(json.load(sys.stdin)['password'])")
+
+        if [ -z "$ADMIN_USER" ] || [ -z "$ADMIN_PASS" ]; then
+          echo "❌ Failed to parse admin credentials!"
+          exit 1
+        fi
+
+        echo "✅ Admin credentials fetched!"
+
+        cat > ~/client.properties << EOF
+        security.protocol=SASL_SSL
+        sasl.mechanism=SCRAM-SHA-512
+        sasl.jaas.config=org.apache.kafka.common.security.scram.ScramLoginModule required username="$ADMIN_USER" password="$ADMIN_PASS";
+        EOF
+
+        echo "✅ client.properties created!"
+
+        # ─────────────────────────────────────
+        # VALIDATION 5 - Connect to Broker
+        # ─────────────────────────────────────
+        echo ""
+        echo "══════════════════════════════════════"
+        echo "🔍 Validation 5 - Connecting to broker..."
+        echo "══════════════════════════════════════"
+
+        TOPICS=$(kafka-topics.sh \
+          --bootstrap-server "$BOOTSTRAP_BROKER" \
+          --command-config ~/client.properties \
+          --list 2>&1)
+
+        if [ $? -ne 0 ]; then
+          echo "❌ Failed to connect to broker!"
+          echo "   Error: $TOPICS"
+          exit 1
+        fi
+
+        echo "✅ Connected to broker!"
+        echo "   Total topics: $(echo "$TOPICS" | wc -l)"
+
+        # ─────────────────────────────────────
+        # VALIDATION 6 - Check Topic Exists
+        # ─────────────────────────────────────
+        echo ""
+        echo "══════════════════════════════════════"
+        echo "🔍 Validation 6 - Checking topic '$TOPIC_NAME'..."
+        echo "══════════════════════════════════════"
+
+        TOPIC_EXISTS=$(echo "$TOPICS" | grep -w "$TOPIC_NAME" || true)
+
+        if [ -z "$TOPIC_EXISTS" ]; then
+          echo "❌ Topic '$TOPIC_NAME' does NOT exist!"
+          echo "👉 Please contact Admin to create topic"
+          exit 1
+        fi
+
+        echo "✅ Topic '$TOPIC_NAME' found!"
+
+        # ─────────────────────────────────────
+        # VALIDATION 7 - Check User in Secrets Manager
+        # ─────────────────────────────────────
+        echo ""
+        echo "══════════════════════════════════════"
+        echo "🔍 Validation 7 - Checking user '$USERNAME'..."
+        echo "══════════════════════════════════════"
+
+        USER_SECRET=$(aws secretsmanager get-secret-value \
+          --secret-id "msk/users/$USERNAME" \
+          --region "$AWS_REGION" \
+          --query 'SecretString' \
+          --output text 2>&1)
+
+        if [ $? -ne 0 ]; then
+          echo "❌ User '$USERNAME' NOT found in Secrets Manager!"
+          echo "👉 Please contact Admin to create: msk/users/$USERNAME"
+          exit 1
+        fi
+
+        echo "✅ User '$USERNAME' found in Secrets Manager!"
+
+        # ─────────────────────────────────────
+        # VALIDATION 8 - Check User Associated with MSK
+        # ─────────────────────────────────────
+        echo ""
+        echo "══════════════════════════════════════"
+        echo "🔍 Validation 8 - Checking user associated with MSK..."
+        echo "══════════════════════════════════════"
+
+        SECRET_ARN=$(aws secretsmanager describe-secret \
+          --secret-id "msk/users/$USERNAME" \
+          --region "$AWS_REGION" \
+          --query 'ARN' \
+          --output text 2>&1)
+
+        ASSOCIATED=$(aws kafka list-scram-secrets \
+          --cluster-arn "$CLUSTER_ARN" \
+          --region "$AWS_REGION" \
+          --query 'SecretArnList' \
+          --output text 2>&1 | grep "$SECRET_ARN" || true)
+
+        if [ -z "$ASSOCIATED" ]; then
+          echo "❌ User '$USERNAME' NOT associated with MSK!"
+          echo "👉 Please contact Admin to associate user"
+          exit 1
+        fi
+
+        echo "✅ User '$USERNAME' is associated with MSK!"
+
+        # ─────────────────────────────────────
+        # VALIDATION 9 - Check ACL Not Already Applied
+        # ─────────────────────────────────────
+        echo ""
+        echo "══════════════════════════════════════"
+        echo "🔍 Validation 9 - Checking ACL not already applied..."
+        echo "══════════════════════════════════════"
+
+        EXISTING_ACL=$(kafka-acls.sh \
+          --bootstrap-server "$BOOTSTRAP_BROKER" \
+          --command-config ~/client.properties \
+          --list \
+          --topic "$TOPIC_NAME" 2>&1 | grep "User:$USERNAME" | grep "$PERMISSION" || true)
+
+        if [ -n "$EXISTING_ACL" ]; then
+          echo "⚠️ ACL already exists!"
+          echo "   User       : $USERNAME"
+          echo "   Topic      : $TOPIC_NAME"
+          echo "   Permission : $PERMISSION"
+          echo "👉 No need to apply again!"
+          exit 1
+        fi
+
+        echo "✅ ACL does not exist yet!"
+
+        # ─────────────────────────────────────
+        # ALL VALIDATIONS PASSED
+        # ─────────────────────────────────────
+        echo ""
+        echo "══════════════════════════════════════"
+        echo "✅ ALL VALIDATIONS PASSED!"
+        echo "   Cluster    : $CLUSTER_NAME"
+        echo "   Topic      : $TOPIC_NAME"
+        echo "   Username   : $USERNAME"
+        echo "   Permission : $PERMISSION"
+        echo "   Broker     : $BOOTSTRAP_BROKER"
+        echo "══════════════════════════════════════"
+
+        echo "bootstrap-broker=$BOOTSTRAP_BROKER" >> $GITHUB_OUTPUT
+        echo "cluster-arn=$CLUSTER_ARN" >> $GITHUB_OUTPUT

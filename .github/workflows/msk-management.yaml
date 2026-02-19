@@ -1,15 +1,74 @@
-name: Test AWS Authentication
+name: Apply MSK ACL
 
 on:
   workflow_dispatch:
+    inputs:
+      cluster_name:
+        description: 'MSK Cluster Name'
+        required: true
+      topic_name:
+        description: 'Kafka Topic Name'
+        required: true
+      username:
+        description: 'Username (must exist in Secrets Manager)'
+        required: true
+      permission:
+        description: 'Permission'
+        required: true
+        type: choice
+        options:
+          - READ
+          - WRITE
+          - ALL
 
 permissions:
   id-token: write
   contents: read
 
 jobs:
-  test-auth:
+
+  # ══════════════════════════════════════
+  # STAGE 1 - LOAD CONFIGURATION
+  # ══════════════════════════════════════
+  load-configuration:
     runs-on: self-hosted
+    outputs:
+      cluster_name: ${{ steps.config.outputs.cluster_name }}
+      topic_name: ${{ steps.config.outputs.topic_name }}
+      username: ${{ steps.config.outputs.username }}
+      permission: ${{ steps.config.outputs.permission }}
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v3
+
+      - name: Load Configuration
+        id: config
+        run: |
+          echo "══════════════════════════════════════"
+          echo "📋 Stage 1 - Loading Configuration..."
+          echo "══════════════════════════════════════"
+          echo "   Cluster    : ${{ github.event.inputs.cluster_name }}"
+          echo "   Topic      : ${{ github.event.inputs.topic_name }}"
+          echo "   Username   : ${{ github.event.inputs.username }}"
+          echo "   Permission : ${{ github.event.inputs.permission }}"
+          echo "══════════════════════════════════════"
+          echo "✅ Configuration loaded!"
+
+          echo "cluster_name=${{ github.event.inputs.cluster_name }}" >> $GITHUB_OUTPUT
+          echo "topic_name=${{ github.event.inputs.topic_name }}" >> $GITHUB_OUTPUT
+          echo "username=${{ github.event.inputs.username }}" >> $GITHUB_OUTPUT
+          echo "permission=${{ github.event.inputs.permission }}" >> $GITHUB_OUTPUT
+
+  # ══════════════════════════════════════
+  # STAGE 2 - VALIDATION
+  # ══════════════════════════════════════
+  validation:
+    runs-on: self-hosted
+    needs: load-configuration
+    outputs:
+      bootstrap_broker: ${{ steps.validate.outputs.bootstrap-broker }}
+      cluster_arn: ${{ steps.validate.outputs.cluster-arn }}
 
     steps:
       - name: Checkout Code
@@ -18,10 +77,104 @@ jobs:
       - name: Authenticate to AWS
         uses: ./.github/actions/aws-oidc-auth
         with:
-          aws-region: us-east-1
-          iam-role-arn: arn:aws:iam::972999821187:role/github-aws-oidc-role
+          aws-region: ${{ secrets.AWS_REGION }}
+          iam-role-arn: ${{ secrets.IAM_ROLE_ARN }}
           session-duration: '900'
 
-      - name: Verify Authentication
-        run: |
-          aws sts get-caller-identity
+      - name: Run All Validations
+        id: validate
+        uses: ./.github/actions/msk-validation
+        with:
+          cluster-name: ${{ needs.load-configuration.outputs.cluster_name }}
+          topic-name: ${{ needs.load-configuration.outputs.topic_name }}
+          username: ${{ needs.load-configuration.outputs.username }}
+          permission: ${{ needs.load-configuration.outputs.permission }}
+          aws-region: ${{ secrets.AWS_REGION }}
+          admin-secret-id: ${{ secrets.ADMIN_SECRET_ID }}
+
+      - name: Cleanup
+        if: always()
+        run: rm -f ~/client.properties
+
+  # ══════════════════════════════════════
+  # STAGE 3 - APPROVAL
+  # ══════════════════════════════════════
+  # approval:
+  #   runs-on: self-hosted
+  #   needs: validation
+  #   environment: production
+
+  #   steps:
+  #     - name: Approval Gate
+  #       run: |
+  #         echo "══════════════════════════════════════"
+  #         echo "⏳ Stage 3 - Waiting for Approval..."
+  #         echo "   All validations passed!"
+  #         echo "   Please approve to proceed"
+  #         echo "══════════════════════════════════════"
+
+  # # ══════════════════════════════════════
+  # # STAGE 4 - EXECUTION
+  # # ══════════════════════════════════════
+  # execution:
+  #   runs-on: self-hosted
+  #   needs: [load-configuration, validation, approval]
+
+  #   steps:
+  #     - name: Checkout Code
+  #       uses: actions/checkout@v3
+
+  #     - name: Authenticate to AWS
+  #       uses: ./.github/actions/aws-oidc-auth
+  #       with:
+  #         aws-region: ${{ secrets.AWS_REGION }}
+  #         iam-role-arn: ${{ secrets.IAM_ROLE_ARN }}
+  #         session-duration: '900'
+
+  #     - name: Make Scripts Executable
+  #       run: chmod +x scripts/msk/*.sh
+
+  #     - name: Setup Admin & Reconnect to Broker
+  #       run: |
+  #         BOOTSTRAP_BROKER="${{ needs.validation.outputs.bootstrap_broker }}"
+
+  #         echo "🔍 Fetching admin credentials..."
+
+  #         SECRET=$(aws secretsmanager get-secret-value \
+  #           --secret-id "${{ secrets.ADMIN_SECRET_ID }}" \
+  #           --region "${{ secrets.AWS_REGION }}" \
+  #           --query 'SecretString' \
+  #           --output text)
+
+  #         ADMIN_USER=$(echo "$SECRET" | python3 -c "import sys,json; print(json.load(sys.stdin)['username'])")
+  #         ADMIN_PASS=$(echo "$SECRET" | python3 -c "import sys,json; print(json.load(sys.stdin)['password'])")
+
+  #         cat > ~/client.properties << EOF
+  #         security.protocol=SASL_SSL
+  #         sasl.mechanism=SCRAM-SHA-512
+  #         sasl.jaas.config=org.apache.kafka.common.security.scram.ScramLoginModule required username="$ADMIN_USER" password="$ADMIN_PASS";
+  #         EOF
+
+  #         echo "✅ Reconnected to broker: $BOOTSTRAP_BROKER"
+
+  #     - name: Apply ACL
+  #       run: |
+  #         ./scripts/msk/apply-acl.sh \
+  #           "${{ needs.load-configuration.outputs.username }}" \
+  #           "${{ needs.load-configuration.outputs.topic_name }}" \
+  #           "${{ needs.load-configuration.outputs.permission }}" \
+  #           "${{ needs.validation.outputs.bootstrap_broker }}"
+
+  #     - name: Verify ACL
+  #       run: |
+  #         ./scripts/msk/verify_acl.sh \
+  #           "${{ needs.load-configuration.outputs.topic_name }}" \
+  #           "${{ needs.validation.outputs.bootstrap_broker }}"
+
+  #     - name: Cleanup
+  #       if: always()
+  #       run: |
+  #         rm -f ~/client.properties
+  #         echo "🧹 Cleanup done!"
+
+
